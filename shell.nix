@@ -68,8 +68,8 @@ let
     haskell-language-server
     hie-bios
     hlint
-    marlowe-playground.generate-purescript
-    marlowe-playground.start-backend
+    #marlowe-playground.generate-purescript
+    #marlowe-playground.start-backend
     plutus-playground.generate-purescript
     plutus-playground.start-backend
     plutus-pab.generate-purescript

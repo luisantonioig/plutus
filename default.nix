@@ -21,7 +21,7 @@
 , enableHaskellProfiling ? false
 }:
 let
-  inherit (packages) pkgs plutus;
+  inherit (packages) pkgs plutus sources;
   inherit (pkgs) lib haskell-nix;
   inherit (plutus) haskell iohkNix git-rev set-git-rev agdaPackages;
   inherit (plutus) easyPS sphinxcontrib-haddock;
@@ -96,5 +96,57 @@ rec {
     inherit plutus marlowe-playground plutus-playground;
   };
 
-  deployment-shell = pkgs.callPackage ./deployment/shell.nix { };
+  # Build the shell expression to be sure it works on all platforms
+  #
+  # The shell should never depend on any of our Haskell packages, which can
+  # sometimes happen by accident. In practice, everything depends transitively
+  # on 'plutus-core', so this does the job.
+  # FIXME: this should simply be set on the main shell derivation, but this breaks
+  # lorri: https://github.com/target/lorri/issues/489. In the mean time, we set it
+  # only on the CI version, so that we still catch it, but lorri doesn't see it.
+  shell = (import ./shell.nix { }).overrideAttrs (attrs: attrs // {
+    disallowedRequisites = [ plutus.haskell.packages.plutus-core.components.library ];
+  });
+
+  # This is an evil hack to allow us to have a docker container with a "similar" environment to
+  # our haskell.nix shell without having it actually run nix-shell. In particular, we need some
+  # of the flags that the stdenv setup hooks set based on the build inputs, like NIX_LDFLAGS.
+  # The result of this derivation is a file that can be sourced to set the variables we need.
+  horrible-env-vars-hack = pkgs.runCommand "exfiltrate-env-vars" { inherit (shell) buildInputs propagatedBuildInputs; } ''
+    #export -p | grep -E "NIX_LDFLAGS|NIX_CLFAGS_COMPILE|PKG_CONFIG_PATH" >> $out
+    #export -p >> $out
+    set | grep -v -E '^BASHOPTS=|^BASH_VERSINFO=|^EUID=|^PPID=|^SHELLOPTS=|^UID=|^HOME=|^TEMP=|^TMP=|^TEMPDIR=|^TMPDIR=|^NIX_ENFORCE_PURITY=' >> $out
+  '';
+
+  # WIP to make a VS Code devcontainer that can be used for working on plutus code
+  #   docker load < $(nix-build --system x86_64-linux -A devcontainer)
+  # In VS Code install:
+  #   https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers
+  devcontainer =
+    pkgs.callPackage (import ./devcontainer) {
+      name = "plutus-devcontainer";
+      tag = "latest";
+      extraContents = [
+        shell.ghc
+        plutus.haskell-language-server
+        plutus.cabal-install
+        pkgs.binutils
+        pkgs.zsh
+        pkgs.numactl
+      ];
+      extraCommands = ''
+        chmod +w etc
+        mkdir -p etc/profile.d
+        echo 'set -o allexport' >> etc/profile.d/env.sh
+        echo 'source ${horrible-env-vars-hack}' >> etc/profile.d/env.sh
+        echo 'set +o allexport' >> etc/profile.d/env.sh
+        # We just clobbered this, put it back
+        echo 'export PATH=$PATH:/usr/bin:/bin' >> etc/profile.d/env.sh
+        echo 'export NIX_BUILD_TOP=$(mktemp -d)' >> etc/profile.d/env.sh
+
+        chmod +w root
+        # Load all the stuff in an interactive session too
+        echo 'source /etc/profile.d/env.sh' >> root/.bashrc
+      '';
+    };
 }
