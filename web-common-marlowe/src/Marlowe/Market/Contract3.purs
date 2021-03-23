@@ -24,6 +24,7 @@ metaData =
       fromFoldable
         [ "alice" /\ "about the alice role"
         , "bob" /\ "about the bob role"
+        , "carol" /\ "about the carol role"
         ]
   , slotParameterDescriptions:
       fromFoldable
